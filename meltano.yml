@@ -18,30 +18,33 @@ plugins:
     - about
     - stream-maps
 
-    # TODO: Declare settings and their types here:
     settings:
-    - name: username
-      label: Username
-      description: The username to use for authentication
-
-    - name: password
+    - name: api_key
       kind: password
-      label: Password
-      description: The password to use for authentication
+      label: API Key
+      description: The API key to authenticate against the Tiingo API service
       sensitive: true
+
+    - name: tickers
+      kind: array
+      label: Stock Tickers
+      description: List of stock tickers to replicate (e.g., ['AAPL', 'GOOGL'])
 
     - name: start_date
       kind: date_iso8601
       label: Start Date
-      description: Initial date to start extracting data from
+      description: The earliest record date to sync
 
-    # TODO: Declare required settings here:
-    settings_group_validation:
-    - [username, password]
+    - name: api_url
+      label: API URL
+      description: The base URL for the Tiingo API service
 
-    # TODO: Declare default configuration values here:
+
     config:
-      start_date: '2010-01-01T00:00:00Z'
+      api_url: 'https://api.tiingo.com'
+      tickers: ['AAPL', 'GOOGL']
+      start_date: '2020-01-01T00:00:00Z'
+      api_key: ${TIINGO_API_KEY}
 
   loaders:
   - name: target-jsonl

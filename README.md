@@ -1,45 +1,30 @@
 # tap-tiingo
 
-`tap-tiingo` is a Singer tap for Tiingo.
+`tap-tiingo` is a Singer tap for Tiingo, built with the [Meltano Tap SDK](https://sdk.meltano.com) for Singer Taps.
 
-Built with the [Meltano Tap SDK](https://sdk.meltano.com) for Singer Taps.
-
-<!--
-
-Developer TODO: Update the below as needed to correctly describe the install procedure. For instance, if you do not have a PyPI repo, or if you want users to directly install from your git repo, you can modify this step as appropriate.
+This tap extracts stock market data from the [Tiingo API](https://www.tiingo.com/), including stock prices and ticker metadata.
 
 ## Installation
-
-Install from PyPI:
-
-```bash
-pipx install tap-tiingo
-```
 
 Install from GitHub:
 
 ```bash
-pipx install git+https://github.com/ORG_NAME/tap-tiingo.git@main
+pipx install git+https://github.com/melgazar9/tap-tiingo.git@main
 ```
-
--->
 
 ## Configuration
 
 ### Accepted Config Options
 
-<!--
-Developer TODO: Provide a list of config options accepted by the tap.
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| api_key | True | None | The API key to authenticate against the Tiingo API service |
+| symbols | False | ["AAPL", "GOOGL"] | List of stock symbols to replicate (e.g., ['AAPL', 'GOOGL']) |
+| start_date | False | None | The earliest record date to sync |
+| api_url | False | "https://api.tiingo.com" | The base URL for the Tiingo API service |
+| user_agent | False | None | A custom User-Agent header to send with each request |
 
-This section can be created by copy-pasting the CLI output from:
-
-```
-tap-tiingo --about --format=markdown
-```
--->
-
-A full list of supported settings and capabilities for this
-tap is available by running:
+A full list of supported settings and capabilities is available by running:
 
 ```bash
 tap-tiingo --about
@@ -53,9 +38,37 @@ environment variable is set either in the terminal context or in the `.env` file
 
 ### Source Authentication and Authorization
 
-<!--
-Developer TODO: If your tap requires special access on the source system, or any special authentication requirements, provide those here.
--->
+You need a Tiingo API key to use this tap. Sign up for a free account at [Tiingo](https://www.tiingo.com/) to get your API key.
+
+Set your API key as an environment variable:
+```bash
+export TIINGO_API_KEY="your_api_key_here"
+```
+
+Or include it in your config file:
+```json
+{
+  "api_key": "your_api_key_here",
+  "symbols": ["AAPL", "GOOGL", "MSFT"],
+  "start_date": "2023-01-01T00:00:00Z"
+}
+```
+
+## Streams
+
+This tap currently supports two streams:
+
+### ticker_metadata
+- **Description**: Stock ticker metadata including company name, description, and data availability dates
+- **Primary Keys**: ticker
+- **Replication Method**: FULL_TABLE
+- **API Endpoint**: `/tiingo/daily/{symbol}`
+
+### daily_prices  
+- **Description**: Daily stock price data including OHLCV, adjusted prices, dividends, and split factors
+- **Primary Keys**: ticker, date
+- **Replication Method**: INCREMENTAL (based on date)
+- **API Endpoint**: `/tiingo/daily/{symbol}/prices`
 
 ## Usage
 

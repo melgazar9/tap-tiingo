@@ -23,17 +23,12 @@ SCHEMAS_DIR = resources.files(__package__) / "schemas"
 class TiingoStream(RESTStream):
     """Tiingo stream class."""
 
-    # Update this value if necessary or override `parse_response`.
     records_jsonpath = "$[*]"
-
-    # Update this value if necessary or override `get_new_paginator`.
-    next_page_token_jsonpath = "$.next_page"  # noqa: S105
 
     @property
     def url_base(self) -> str:
         """Return the API URL root, configurable via tap settings."""
-        # TODO: hardcode a value here, or retrieve it from self.config
-        return "https://api.mysample.com"
+        return self.config.get("api_url", "https://api.tiingo.com")
 
     @property
     def authenticator(self) -> APIKeyAuthenticator:
@@ -44,8 +39,8 @@ class TiingoStream(RESTStream):
         """
         return APIKeyAuthenticator.create_for_stream(
             self,
-            key="x-api-key",
-            value=self.config.get("auth_token", ""),
+            key="Authorization",
+            value=f"Token {self.config.get('api_key', '')}",
             location="header",
         )
 
@@ -77,8 +72,8 @@ class TiingoStream(RESTStream):
 
     def get_url_params(
         self,
-        context: Context | None,  # noqa: ARG002
-        next_page_token: t.Any | None,  # noqa: ANN401
+        context: Context | None,
+        next_page_token: t.Any | None,
     ) -> dict[str, t.Any]:
         """Return a dictionary of values to be used in URL parameterization.
 
@@ -89,31 +84,18 @@ class TiingoStream(RESTStream):
         Returns:
             A dictionary of URL query parameters.
         """
-        params: dict = {}
-        if next_page_token:
-            params["page"] = next_page_token
-        if self.replication_key:
-            params["sort"] = "asc"
-            params["order_by"] = self.replication_key
-        return params
+        return {}
 
     def prepare_request_payload(
         self,
-        context: Context | None,  # noqa: ARG002
-        next_page_token: t.Any | None,  # noqa: ARG002, ANN401
+        context: Context | None,
+        next_page_token: t.Any | None,
     ) -> dict | None:
         """Prepare the data payload for the REST API request.
 
-        By default, no payload will be sent (return None).
-
-        Args:
-            context: The stream context.
-            next_page_token: The next page index or value.
-
         Returns:
-            A dictionary with the JSON body for a POST requests.
+            None - Tiingo API uses GET requests only.
         """
-        # TODO: Delete this method if no payload is required. (Most REST APIs.)
         return None
 
     def parse_response(self, response: requests.Response) -> t.Iterable[dict]:
@@ -125,7 +107,6 @@ class TiingoStream(RESTStream):
         Yields:
             Each record from the source.
         """
-        # TODO: Parse response body and return a set of records.
         yield from extract_jsonpath(
             self.records_jsonpath,
             input=response.json(parse_float=decimal.Decimal),
@@ -134,16 +115,15 @@ class TiingoStream(RESTStream):
     def post_process(
         self,
         row: dict,
-        context: Context | None = None,  # noqa: ARG002
+        context: Context | None = None,
     ) -> dict | None:
-        """As needed, append or transform raw data to match expected structure.
+        """Post-process record data.
 
         Args:
             row: An individual record from the stream.
             context: The stream context.
 
         Returns:
-            The updated record dictionary, or ``None`` to skip the record.
+            The updated record dictionary.
         """
-        # TODO: Delete this method if not needed.
         return row
