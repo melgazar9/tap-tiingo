@@ -10,34 +10,50 @@ from singer_sdk.helpers.types import Context
 from tap_tiingo.client import TiingoStream
 
 
-class TickerPartitionStream(TiingoStream):
+class BaseTickerPartitionStream(TiingoStream):
     """Base stream for ticker-partitioned data."""
 
     @property
     def partitions(self) -> list[dict]:
         """Return a list of partition contexts."""
-        return [{"ticker": t["ticker"]} for t in self._tap.get_cached_tickers()]
+        raise NotImplementedError("Subclasses must implement partitions property")
 
-    def post_process(self, row: dict, context: Context | None = None) -> dict | None:
-        """Post-process record to transform camelCase to snake_case."""
-        if not context or "ticker" not in context:
-            raise ValueError("ticker context is required")
+    def get_starting_replication_key_value(self, context: Context | None) -> t.Any | None:
+        """Get starting replication key value from state or config."""
+        if not self.replication_key:
+            return None
 
-        row["ticker"] = context["ticker"]
+        state = self.get_context_state(context)
+        if state and "replication_key_value" in state:
+            return state["replication_key_value"]
 
-        transformed = {}
-        for key, value in row.items():
-            new_key = self._get_field_mapping().get(key, key)
-            transformed[new_key] = value
-        
-        return transformed
+        return self.config.get("start_date")
 
-    def _get_field_mapping(self) -> dict[str, str]:
-        """Get field mapping for camelCase to snake_case transformation."""
-        return {}
+    def get_url_params(self, context: Context | None, next_page_token: t.Any | None) -> dict[str, t.Any]:
+        """Return URL parameters with incremental replication support."""
+        params = {}
+
+        if self.replication_key:
+            start_value = self.get_starting_replication_key_value(context)
+            if start_value:
+                params["startDate"] = start_value
+
+        if self.config.get("end_date"):
+            params["endDate"] = self.config["end_date"]
+
+        return params
 
 
-class TickerMetadataStream(TickerPartitionStream):
+class StockTickerPartitionStream(BaseTickerPartitionStream):
+    """Stock ticker partition stream."""
+
+    @property
+    def partitions(self) -> list[dict]:
+        """Return a list of stock ticker partition contexts."""
+        return [{"ticker": t["ticker"]} for t in self._tap.get_cached_stock_tickers()]
+
+
+class TickerMetadataStream(StockTickerPartitionStream):
     """Tiingo ticker metadata stream."""
 
     name = "ticker_metadata"
@@ -61,29 +77,22 @@ class TickerMetadataStream(TickerPartitionStream):
         th.Property("exchange_code", th.StringType, description="Exchange code"),
     ).to_dict()
 
-    def _get_field_mapping(self) -> dict[str, str]:
-        """Get field mapping for camelCase to snake_case transformation."""
-        return {
-            "startDate": "start_date",
-            "endDate": "end_date",
-            "exchangeCode": "exchange_code",
-        }
 
-
-class DailyPricesStream(TickerPartitionStream):
+class DailyPricesStream(StockTickerPartitionStream):
     """Tiingo daily prices stream."""
 
     name = "daily_prices"
     path = "/tiingo/daily"
     primary_keys: t.ClassVar[list[str]] = ["ticker", "date"]
     replication_key = "date"
-    records_jsonpath = "$[*]"  # Array of price records
+    replication_method = "INCREMENTAL"
+    records_jsonpath = "$[*]"
 
     def get_url(self, context: Context | None) -> str:
         """Get stream entity URL."""
         if not context or "ticker" not in context:
             raise ValueError("ticker context is required")
-        
+
         ticker = context["ticker"]
         return f"{self.url_base}/tiingo/daily/{ticker}/prices"
 
@@ -103,26 +112,3 @@ class DailyPricesStream(TickerPartitionStream):
         th.Property("div_cash", th.NumberType, description="Dividend cash amount"),
         th.Property("split_factor", th.NumberType, description="Stock split factor"),
     ).to_dict()
-
-    def _get_field_mapping(self) -> dict[str, str]:
-        """Get field mapping for camelCase to snake_case transformation."""
-        return {
-            "adjClose": "adj_close",
-            "adjHigh": "adj_high",
-            "adjLow": "adj_low",
-            "adjOpen": "adj_open",
-            "adjVolume": "adj_volume",
-            "divCash": "div_cash",
-            "splitFactor": "split_factor",
-        }
-
-    def get_url_params(
-        self,
-        context: Context | None,
-        next_page_token: t.Any | None,
-    ) -> dict[str, t.Any]:
-        """Return URL parameters."""
-        params = {}
-        if self.config.get("start_date"):
-            params["startDate"] = self.config["start_date"]
-        return params

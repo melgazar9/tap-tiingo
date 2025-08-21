@@ -1,18 +1,15 @@
 """Tiingo tap class."""
 
 from __future__ import annotations
+
 import threading
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from singer_sdk import Tap
 from singer_sdk import typing as th  # JSON schema typing helpers
 
 from tap_tiingo.client import TiingoStream
-
-from tap_tiingo.streams import (
-    TickerMetadataStream,
-    DailyPricesStream
-)
+from tap_tiingo.streams import DailyPricesStream, TickerMetadataStream
 
 
 class TapTiingo(Tap):
@@ -56,14 +53,11 @@ class TapTiingo(Tap):
         th.Property(
             "user_agent",
             th.StringType(nullable=True),
-            description=(
-                "A custom User-Agent header to send with each request. Default is "
-                "'<tap_name>/<tap_version>'"
-            ),
+            description=("A custom User-Agent header to send with each request. Default is " "'<tap_name>/<tap_version>'"),
         ),
     ).to_dict()
 
-    def get_cached_tickers(self) -> List[Dict[str, Any]]:
+    def get_cached_stock_tickers(self) -> List[Dict[str, Any]]:
         """Get cached tickers with thread safety."""
         if self._cached_tickers is not None:
             return self._cached_tickers
@@ -73,10 +67,9 @@ class TapTiingo(Tap):
                 return self._cached_tickers
 
             tickers_config = self.config["tickers"]
-            
+
             if tickers_config == "*":
                 # TODO: Implement fetching all available tickers from Tiingo API
-                # For now, use a default set
                 self._cached_tickers = [
                     {"ticker": "AAPL"},
                     {"ticker": "GOOGL"},
@@ -86,7 +79,7 @@ class TapTiingo(Tap):
             elif isinstance(tickers_config, list):
                 self._cached_tickers = [{"ticker": ticker} for ticker in tickers_config]
             else:
-                raise ValueError("tickers must be '*' or a list of ticker strings")
+                raise ValueError("tickers must be '*', ['*'] or a list of ticker strings")
 
         return self._cached_tickers
 

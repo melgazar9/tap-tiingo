@@ -5,6 +5,12 @@
 
 .meltano/
 
+# IDE files
+.idea/
+
+# Meltano plugin files
+plugins/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

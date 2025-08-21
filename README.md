@@ -64,7 +64,7 @@ This tap currently supports two streams:
 - **Replication Method**: FULL_TABLE
 - **API Endpoint**: `/tiingo/daily/{symbol}`
 
-### daily_prices  
+### daily_prices
 - **Description**: Daily stock price data including OHLCV, adjusted prices, dividends, and split factors
 - **Primary Keys**: ticker, date
 - **Replication Method**: INCREMENTAL (based on date)

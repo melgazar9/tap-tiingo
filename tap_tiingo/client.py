@@ -2,28 +2,28 @@
 
 from __future__ import annotations
 
-import decimal
+import logging
+import re
 import typing as t
-from importlib import resources
+from decimal import Decimal
+from uuid import NAMESPACE_DNS, uuid5
 
+import backoff
+import requests
 from singer_sdk.authenticators import APIKeyAuthenticator
 from singer_sdk.helpers.jsonpath import extract_jsonpath
+from singer_sdk.helpers.types import Context
 from singer_sdk.pagination import BaseAPIPaginator  # noqa: TC002
 from singer_sdk.streams import RESTStream
-
-if t.TYPE_CHECKING:
-    import requests
-    from singer_sdk.helpers.types import Context
-
-
-# TODO: Delete this is if not using json files for schema definition
-SCHEMAS_DIR = resources.files(__package__) / "schemas"
 
 
 class TiingoStream(RESTStream):
     """Tiingo stream class."""
 
     records_jsonpath = "$[*]"
+
+    _add_ticker = True
+    _add_surrogate_key = False
 
     @property
     def url_base(self) -> str:
@@ -98,6 +98,74 @@ class TiingoStream(RESTStream):
         """
         return None
 
+    @staticmethod
+    def _redact_api_key(msg):
+        return re.sub(r"(api_key=)([^\s&]+)", r"\1<REDACTED>", msg)
+
+    @staticmethod
+    def _to_snake_case(camel_str: str) -> str:
+        """Convert camelCase to snake_case."""
+        s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", camel_str)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+    @backoff.on_exception(
+        backoff.expo,
+        (requests.exceptions.RequestException,),
+        base=5,
+        max_value=300,
+        jitter=backoff.full_jitter,
+        max_tries=12,
+        max_time=1800,
+        giveup=lambda e: (
+            isinstance(e, requests.exceptions.HTTPError)
+            and e.response is not None
+            and e.response.status_code not in (429, 500, 502, 503, 504)
+        ),
+        on_backoff=lambda details: logging.warning(
+            f"API request failed, retrying in {details['wait']:.1f}s " f"(attempt {details['tries']}): {details['exception']}"
+        ),
+    )
+    def fetch_with_retry(self, url: str, params: dict = None) -> requests.Response:
+        """Fetch data with exponential backoff retry logic."""
+        # Log request details with API key redaction
+        log_url = self._redact_api_key(url)
+        log_params = {k: ("<REDACTED>" if "api" in k.lower() else v) for k, v in (params or {}).items()}
+        self.logger.info(f"Stream {self.name}: Requesting {log_url} with params: {log_params}")
+
+        response = self.requests_session.get(
+            url,
+            params=params,
+            headers=self.http_headers,
+            auth=self.authenticator,
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+
+        # Log successful response
+        self.logger.info(f"Stream {self.name}: Response {response.status_code} received")
+        return response
+
+    def get_records(self, context: Context | None) -> t.Iterable[dict]:
+        """Request records from the API using retry logic."""
+        next_page_token = None
+
+        while True:
+            url = self.get_url(context)
+            params = self.get_url_params(context, next_page_token)
+
+            response = self.fetch_with_retry(url, params)
+
+            for record in self.parse_response(response):
+                yield record
+
+            paginator = self.get_new_paginator()
+            if hasattr(paginator, "get_next") and paginator.get_next:
+                next_page_token = paginator.get_next(response)
+                if not next_page_token:
+                    break
+            else:
+                break
+
     def parse_response(self, response: requests.Response) -> t.Iterable[dict]:
         """Parse the response and return an iterator of result records.
 
@@ -107,10 +175,26 @@ class TiingoStream(RESTStream):
         Yields:
             Each record from the source.
         """
-        yield from extract_jsonpath(
-            self.records_jsonpath,
-            input=response.json(parse_float=decimal.Decimal),
-        )
+        try:
+            records = response.json(parse_float=Decimal)
+            if isinstance(records, list):
+                records_snake_case = [{self._to_snake_case(k): v for k, v in record.items()} for record in records]
+            elif isinstance(records, dict):
+                records_snake_case = {self._to_snake_case(k): v for k, v in records.items()}
+            yield from extract_jsonpath(
+                self.records_jsonpath,
+                input=records_snake_case,
+            )
+        except Exception as e:
+            error_msg = f"Error parsing response: {e}"
+            self.logger.error(self._redact_api_key(error_msg))
+            raise e
+
+    @staticmethod
+    def _generate_surrogate_key(data: dict, namespace=NAMESPACE_DNS) -> str:
+        key_values = [str(data.get(field, "")) for field in data]
+        key_string = "|".join(key_values)
+        return str(uuid5(namespace, key_string))
 
     def post_process(
         self,
@@ -126,4 +210,11 @@ class TiingoStream(RESTStream):
         Returns:
             The updated record dictionary.
         """
+        if not context or "ticker" not in context:
+            raise ValueError("ticker context is required")
+
+        if self._add_ticker:
+            row["ticker"] = context["ticker"]
+        if self._add_surrogate_key:
+            row["surrogate_key"] = self._generate_surrogate_key(row)
         return row
